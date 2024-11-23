@@ -1,0 +1,14 @@
+﻿<Project>
+  <PropertyGroup>
+    <GenerateBuildInfoConfigFile>false</GenerateBuildInfoConfigFile>
+    <UseArtifactsOutput>true</UseArtifactsOutput>
+  </PropertyGroup>
+  <PropertyGroup Condition="
+        '$(MSBuildProjectDirectory)' == '$(SolutionDir)src\$(MSBuildProjectName)'">
+    <GenerateDocumentationFile>True</GenerateDocumentationFile>
+  </PropertyGroup>
+  <PropertyGroup Condition="
+        '$(MSBuildProjectDirectory)' == '$(SolutionDir)test\$(MSBuildProjectName)'">
+    <GenerateDocumentationFile>False</GenerateDocumentationFile>
+  </PropertyGroup>
+</Project>
