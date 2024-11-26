@@ -25,8 +25,8 @@ public class AuthController(
     /// Example request:
     /// <code>
     /// {
-    ///     "email": "user@example.com",
-    ///     "password": "P@ssw0rd123"
+    ///   "email": "user@example.com",
+    ///   "password": "P@ssw0rd123"
     /// }
     /// </code>
     /// </remarks>
