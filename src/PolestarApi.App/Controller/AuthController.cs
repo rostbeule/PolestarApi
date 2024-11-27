@@ -1,3 +1,5 @@
+using System.Net.Mime;
+
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using PolestarApi.Contracts.Abstractions;
@@ -12,7 +14,7 @@ namespace PolestarApi.App.Controller;
 [ApiVersion("1.0")]
 [Route("api/v{version:apiVersion}/[controller]")]
 public class AuthController(
-    IAuthService service) 
+    IAuthService service)
     : ControllerBase
 {
     /// <summary>
@@ -35,8 +37,8 @@ public class AuthController(
     /// <response code="401">If the credentials are invalid or authorization failed.</response>
     [HttpPost]
     [AllowAnonymous]
-    [Consumes("application/json")]
-    [Produces("application/json")]
+    [Consumes(MediaTypeNames.Application.Json)]
+    [Produces(MediaTypeNames.Application.Json)]
     [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
