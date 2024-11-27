@@ -9,7 +9,7 @@ namespace PolestarApi.Authentication;
 /// This class offers helper methods for common tasks such as sending POST requests, validating HTTP responses,
 /// extracting query parameters from URIs, and generating random strings.
 /// </remarks>
-public static class HttpHelper
+internal static class HttpHelper
 {
     /// <summary>
     /// Sends a POST request with form-encoded data to the specified URI and returns the resulting request URI.
@@ -31,7 +31,7 @@ public static class HttpHelper
     /// or the resulting request URI is unavailable.
     /// </exception>
     public static async Task<Uri> PostFormAndGetRequestUriAsync(
-        HttpClient client,
+        this HttpClient client,
         string uri,
         Dictionary<string, string> data)
     {
@@ -60,7 +60,7 @@ public static class HttpHelper
     /// <param name="response">
     /// The <see cref="HttpResponseMessage"/> to validate.
     /// </param>
-    /// <param name="errorMessage">
+    /// <param name="defaultErrorMessage">
     /// A custom error message to include in the exception if the validation fails.
     /// </param>
     /// <exception cref="HttpRequestException">
@@ -68,12 +68,19 @@ public static class HttpHelper
     /// </exception>
     public static void EnsureSuccess(
         this HttpResponseMessage response,
-        string errorMessage)
+        string defaultErrorMessage)
     {
-        if (response.IsSuccessStatusCode is false)
+        if (response.IsSuccessStatusCode)
         {
-            throw new HttpRequestException(errorMessage);
+            return;
         }
+
+        var responseBody = response.Content.ReadAsStringAsync().Result;
+        var detailedErrorMessage = !string.IsNullOrWhiteSpace(responseBody)
+            ? $"{defaultErrorMessage}. Response content: {responseBody}"
+            : defaultErrorMessage;
+
+        throw new HttpRequestException(detailedErrorMessage, null, response.StatusCode);
     }
 
     /// <summary>
@@ -89,7 +96,7 @@ public static class HttpHelper
     /// The value of the specified query parameter, or an empty string if the parameter is not found.
     /// </returns>
     public static string ExtractQueryParam(
-        Uri uri,
+        this Uri uri,
         string paramName)
         => HttpUtility
                .ParseQueryString(uri.Query)
