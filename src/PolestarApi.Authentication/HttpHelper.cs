@@ -37,11 +37,8 @@ internal static class HttpHelper
     {
         var content = new FormUrlEncodedContent(data);
         var response = await client.PostAsync(uri, content);
-
-        // Ensure the response indicates success
         response.EnsureSuccess("POST request failed.");
 
-        // Ensure the request URI is available
         var requestUri = response.RequestMessage?.RequestUri;
         if (requestUri is null)
         {

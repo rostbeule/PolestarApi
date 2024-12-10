@@ -32,13 +32,4 @@ internal static class Settings
     /// the client application's settings.
     /// </remarks>
     public const string RedirectUri = "https://www.polestar.com/sign-in-callback";
-
-    /// <summary>
-    /// The base URI for the Polestar API authentication endpoint used for GraphQL requests.
-    /// </summary>
-    /// <remarks>
-    /// This URI serves as the entry point for all GraphQL-based authentication operations,
-    /// such as retrieving OAuth tokens. It is specific to the Polestar API region "eu-north-1".
-    /// </remarks>
-    public const string GraphqlApiAuthUri = "https://pc-api.polestar.com/eu-north-1/auth";
 }

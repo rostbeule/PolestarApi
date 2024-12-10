@@ -1,4 +1,8 @@
-﻿using PolestarApi.Contracts.Abstractions;
+﻿using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+
+using PolestarApi.Contracts.Abstractions;
 using PolestarApi.Contracts.Models;
 
 namespace PolestarApi.Authentication;
@@ -7,30 +11,21 @@ namespace PolestarApi.Authentication;
 /// Provides functionality for authenticating users via the Polestar OAuth identity provider.
 /// </summary>
 /// <remarks>
-/// This service implements the OAuth 2.0 authorization code flow:
-/// 1. Initiates the authorization process with a unique state parameter.
+/// This service implements the OAuth 2.0 Authorization Code Flow with PKCE:
+/// 1. Initiates the authorization process with a unique state parameter and PKCE.
 /// 2. Submits user login credentials.
 /// 3. Handles consent confirmation if required.
-/// 4. Retrieves an authorization code to exchange for an access token.
-///
-/// ### Dependencies:
-/// - <see cref="HttpClient"/>: Used for HTTP requests.
-/// - <see cref="GraphqlService"/>: Facilitates communication with Polestar's GraphQL API.
+/// 4. Retrieves an authorization code and exchanges it for an access token.
 ///
 /// This service is specific to the Polestar identity provider and is not a generic OAuth implementation.
 /// </remarks>
 public sealed class AuthService : IAuthService
 {
     private readonly HttpClient httpClient;
-    private readonly GraphqlService graphqlService;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AuthService"/> class.
     /// </summary>
-    /// <remarks>
-    /// Configures an <see cref="HttpClient"/> to handle cookies for session management
-    /// and initializes the <see cref="GraphqlService"/> for token management.
-    /// </remarks>
     public AuthService()
     {
         httpClient = new HttpClient(
@@ -38,8 +33,6 @@ public sealed class AuthService : IAuthService
             {
                 UseCookies = true
             });
-
-        graphqlService = new GraphqlService(httpClient);
     }
 
     /// <summary>
@@ -61,7 +54,7 @@ public sealed class AuthService : IAuthService
 
         try
         {
-            var authUri = BuildAuthorizationUri(state);
+            var authUri = BuildAuthorizationUri(state, out var codeVerifier);
             var resumePath = await FetchAuthorizationResumePathAsync(authUri);
 
             var loginUri = BuildLoginUri(resumePath);
@@ -72,7 +65,12 @@ public sealed class AuthService : IAuthService
                 loginResponse.AuthCode = await ConfirmConsentAsync(resumePath, loginResponse.UserId!);
             }
 
-            return await graphqlService.GetAuthTokenAsync(loginResponse.AuthCode!);
+            if (loginResponse.AuthCode is null)
+            {
+                throw new InvalidOperationException("The authorization code could not be retrieved.");
+            }
+
+            return await ExchangeCodeForToken(loginResponse.AuthCode, codeVerifier);
         }
         catch (Exception exception)
         {
@@ -166,6 +164,102 @@ public sealed class AuthService : IAuthService
     }
 
     /// <summary>
+    /// Constructs the URI for submitting login credentials during the OAuth flow.
+    /// </summary>
+    /// <param name="resumePath">
+    /// The continuation URI for the login process, obtained from the authorization step.
+    /// </param>
+    /// <returns>
+    /// A fully constructed URI for submitting login credentials.
+    /// </returns>
+    private static string BuildLoginUri(string resumePath) =>
+        $"{Settings.OAuthUri}/as/{resumePath}/resume/as/authorization.ping?client_id={Settings.ClientId}";
+
+    /// <summary>
+    /// Constructs the URI required to initiate the OAuth 2.0 authorization flow with PKCE.
+    /// </summary>
+    /// <param name="state">
+    /// A unique string generated for the OAuth flow to protect against CSRF attacks.
+    /// </param>
+    /// <param name="codeVerifier">
+    /// An output parameter that will hold the generated code verifier used in the PKCE process.
+    /// </param>
+    /// <returns>
+    /// A string representing the full authorization URI that can be used to redirect the user to
+    /// the OAuth authorization server.
+    /// </returns>
+    /// <remarks>
+    /// This method constructs a URI that includes all necessary query parameters to initiate the
+    /// OAuth 2.0 authorization code flow with PKCE:
+    /// - client_id: The client identifier for the application making the request.
+    /// - redirect_uri: The URI to which the authorization code will be sent after authentication.
+    /// - response_type: Specifies that the authorization code should be returned.
+    /// - state: A random string generated to prevent CSRF attacks.
+    /// - scope: The access permissions requested by the application (openid, profile, email, customer:attributes).
+    /// - code_challenge: The base64 URL-safe encoded SHA256 hash of the code verifier, used in PKCE to mitigate
+    ///                   interception attacks.
+    /// - code_challenge_method: Specifies the hashing algorithm used for the code challenge (S256).
+    /// </remarks>
+    private static string BuildAuthorizationUri(string state, out string codeVerifier)
+    {
+        // Generate a random code verifier and its corresponding code challenge.
+        codeVerifier = GenerateCodeVerifier();
+        var codeChallenge = GenerateCodeChallenge(codeVerifier);
+
+        // Construct and return the full OAuth authorization URI.
+        return
+            $"{Settings.OAuthUri}/as/authorization.oauth2" +
+            $"?client_id={Settings.ClientId}" +
+            $"&redirect_uri={Settings.RedirectUri}" +
+            $"&response_type=code" +
+            $"&state={state}" +
+            $"&scope=openid profile email customer:attributes" +
+            $"&code_challenge={codeChallenge}" +
+            $"&code_challenge_method=S256";
+    }
+
+    /// <summary>
+    /// Generates a random code verifier used in the OAuth 2.0 Authorization Code Flow with PKCE.
+    /// </summary>
+    /// <returns>
+    /// A base64 URL-safe encoded string representing the code verifier.
+    /// </returns>
+    private static string GenerateCodeVerifier()
+    {
+        var randomBytes = new byte[32];
+        using (var rng = RandomNumberGenerator.Create())
+        {
+            rng.GetBytes(randomBytes);
+        }
+
+        return Convert
+            .ToBase64String(randomBytes)
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
+    }
+
+    /// <summary>
+    /// Generates the code challenge based on the provided code verifier.
+    /// </summary>
+    /// <param name="codeVerifier">
+    /// The code verifier used in the OAuth 2.0 Authorization Code Flow with PKCE.
+    /// </param>
+    /// <returns>
+    /// A base64 URL-safe encoded string representing the code challenge.
+    /// </returns>
+    private static string GenerateCodeChallenge(string codeVerifier)
+    {
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(codeVerifier));
+
+        return Convert
+            .ToBase64String(hash)
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
+    }
+
+    /// <summary>
     /// Confirms consent and retrieves the authorization code required for OAuth authentication.
     /// </summary>
     /// <param name="resumePath">
@@ -206,31 +300,47 @@ public sealed class AuthService : IAuthService
     }
 
     /// <summary>
-    /// Constructs the OAuth authorization URI with the required parameters.
+    /// Exchanges the authorization code for an access token.
     /// </summary>
-    /// <param name="state">
-    /// A unique state string used to correlate the request and prevent CSRF attacks.
+    /// <param name="authCode">
+    /// The authorization code obtained from the OAuth authorization flow.
+    /// </param>
+    /// <param name="codeVerifier">
+    /// The code verifier used during the authorization process (PKCE).
     /// </param>
     /// <returns>
-    /// A fully constructed URI for initiating the OAuth authorization process.
+    /// An <see cref="AuthResponse"/> containing the access token and additional details.
     /// </returns>
-    private static string BuildAuthorizationUri(string state) =>
-        $"{Settings.OAuthUri}/as/authorization.oauth2" +
-        $"?client_id={Settings.ClientId}" +
-        $"&redirect_uri={Settings.RedirectUri}" +
-        $"&response_type=code" +
-        $"&state={state}" +
-        $"&scope=openid profile email customer:attributes";
+    /// <exception cref="HttpRequestException">
+    /// Thrown if the HTTP request fails during the token exchange process.
+    /// </exception>
+    private async Task<AuthResponse?> ExchangeCodeForToken(
+        string authCode,
+        string codeVerifier)
+    {
+        var tokenRequestData = new Dictionary<string, string>
+        {
+            { "grant_type", "authorization_code" },
+            { "code", authCode },
+            { "code_verifier", codeVerifier },
+            { "client_id", Settings.ClientId },
+            { "redirect_uri", Settings.RedirectUri }
+        };
 
-    /// <summary>
-    /// Constructs the URI for submitting login credentials during the OAuth flow.
-    /// </summary>
-    /// <param name="resumePath">
-    /// The continuation URI for the login process, obtained from the authorization step.
-    /// </param>
-    /// <returns>
-    /// A fully constructed URI for submitting login credentials.
-    /// </returns>
-    private static string BuildLoginUri(string resumePath) =>
-        $"{Settings.OAuthUri}/as/{resumePath}/resume/as/authorization.ping?client_id={Settings.ClientId}";
+        var response = await httpClient
+            .PostAsync(
+                requestUri: $"{Settings.OAuthUri}/as/token.oauth2",
+                content: new FormUrlEncodedContent(tokenRequestData));
+
+        response.EnsureSuccessStatusCode();
+
+        var responseContent = await response.Content.ReadAsStringAsync();
+
+        var options = new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        };
+
+        return JsonSerializer.Deserialize<AuthResponse>(responseContent, options);
+    }
 }
